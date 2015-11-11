@@ -1,9 +1,7 @@
 # arctools
-
 Wrapper for making my gis-day easier. Based on ESRI's arcpy module for ArcGIS Desktop.
 <br/>
-
-<br/><br/>
+<br/>
 Two primary functions:
 <ul>
 <li><b>tableToDict</b>: Take any database table and convert to a list of dictionaries (or a dictionary of dictionaries!). Supports grouping based on field attributes, and reading of only specific fields.</li>
