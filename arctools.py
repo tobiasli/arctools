@@ -114,6 +114,9 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
     outputDataset = table
     workspace = os.path.dirname(table)
 
+    if arcpy.Exists(modifyTable):
+        arcpy.Delete_management(modifyTable)
+
     if not makeTable:
         modifyTable = outputDataset
 
@@ -164,13 +167,13 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
     for field in dictionaryFields:
         if re.findall(shapeIdentification,field.lower()):
             featureClass = True
-            if not featureClassType:
+            if makeTable and not featureClassType:
                 if hasattr(dictionaryFrame[field],'type'):
                     featureClassType = dictionaryFrame[field].type
                 else:
                     raise Exception('featureClassType argument not passed, and input dictionary shape field %s does not have a type attribute' % field)
 
-            if not spatialReference:
+            if makeTable and not spatialReference:
                 if hasattr(dictionaryFrame[field],'spatialReference'):
                     spatialReference = dictionaryFrame[field].spatialReference
                 else:

@@ -15,7 +15,7 @@ TEST_GDB = os.path.join(PATH,r'bin\test.gdb')
 
 DATASETS = ['feature_class','geodatabase_table']
 FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
-            ['nisse']
+            ['index', 'date', 'age', 'content']
             ]
 
 METHODS = ['insert','update','delete']
@@ -40,9 +40,19 @@ class TestArctoolsModule(unittest.TestCase):
             fullpath = os.path.join(TEST_GDB,dataset)
             output = fullpath + '_output'
 
+            if arcpy.Exists(output):
+                arcpy.Delete_management(output)
+
             data = arctools.tableToDict(fullpath,fields = fields)
             self.assertTrue(data)
             arctools.dictToTable(data,output)
+
+            # Test fail when writing to existing table or feature class:
+            try:
+                arctools.dictToTable(data,output,method = 'insert', makeTable = True) # makeTable should be false when writing to an existing table. This should therefore fail.
+                self.fail('arctools.dictToTable overwrote output when is should have failed.')
+            except:
+                self.assertTrue(True) # Test is a success if the above line fails.
 
             # Test insert:
             arctools.dictToTable(data,output,method = 'insert', makeTable = False) #Duplicate contents of output table.
