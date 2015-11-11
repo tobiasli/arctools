@@ -14,6 +14,11 @@ PATH = os.path.dirname(__file__)
 TEST_GDB = os.path.join(PATH,r'bin\test.gdb')
 
 DATASETS = ['feature_class','geodatabase_table']
+FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
+            ['nisse']
+            ]
+
+METHODS = ['insert','update','delete']
 
 class TestArctoolsModule(unittest.TestCase):
 
@@ -31,13 +36,18 @@ class TestArctoolsModule(unittest.TestCase):
         import arctools
         import arcpy
 
-        for dataset in DATASETS:
+        for dataset,fields in zip(DATASETS,FIELDS):
             fullpath = os.path.join(TEST_GDB,dataset)
             output = fullpath + '_output'
 
-            data = arctools.tableToDict(fullpath)
+            data = arctools.tableToDict(fullpath,fields = fields)
             self.assertTrue(data)
             arctools.dictToTable(data,output)
+
+            # Test insert:
+            arctools.dictToTable(data,output,method = 'insert', makeTable = False) #Duplicate contents of output table.
+            test = arctools.tableToDict(output,fields = fields)
+            self.assertTrue(test == data + data)
 
             arcpy.Delete_management(output)
 

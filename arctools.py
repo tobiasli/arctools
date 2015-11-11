@@ -112,6 +112,10 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
     shapeIdentification = '(?i)^shape(@\w*)?$'
     modifyTable = 'in_memory\\temporary_dataset'
     outputDataset = table
+    workspace = os.path.dirname(table)
+
+    if not makeTable:
+        modifyTable = outputDataset
 
     # Get the field names from the first list in the
     islist = False
@@ -172,41 +176,42 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
                 else:
                     raise Exception('spatialReference argument not passed, and input dictionary shape field %s does not have a spatialReference attribute' % field)
 
-    # Create modifiable table. (Do not write to actual output until end of method).
-    if featureClass:
-        result = arcpy.CreateFeatureclass_management(os.path.split(modifyTable)[0],os.path.split(modifyTable)[1],geometry_type = featureClassType, spatial_reference = spatialReference)
-    else:
-        result = arcpy.CreateTable_management(os.path.split(modifyTable)[0],os.path.split(modifyTable)[1])
+    if makeTable:
+        # Create modifiable table. (Do not write to actual output until end of method).
+        if featureClass:
+            result = arcpy.CreateFeatureclass_management(os.path.split(modifyTable)[0],os.path.split(modifyTable)[1],geometry_type = featureClassType, spatial_reference = spatialReference)
+        else:
+            result = arcpy.CreateTable_management(os.path.split(modifyTable)[0],os.path.split(modifyTable)[1])
 
-    modifyTable = str(result) # Get the actual path to the output, as the in_memory output might change depending on environment.
+        modifyTable = str(result) # Get the actual path to the output, as the in_memory output might change depending on environment.
 
-    # Add fields to table.
-    # Loop through key/value pairs and create fields according to the contents
-    # of the first item in the dictionary. Default field type is text if
-    # nothing else is found.
-    for k,v in dictionaryFrame.items():
-        fieldType = 'TEXT'
-        length = 50
-        if re.findall(shapeIdentification,k):
-            continue #Skip create field if shape.
-        elif k == 'GLOBALID':
-            fieldType = 'GUID'
-        elif isinstance(v,int):
-            fieldType = 'LONG'
-        elif isinstance(v,str):
-            if len(v) > length:
-                length = len(v)
-        elif isinstance(v,float):
-            fieldType = 'DOUBLE'
-        elif isinstance(v,datetime.datetime):
-            fieldType = 'DATE'
-        try:
-            arcpy.AddField_management(modifyTable,k,fieldType,field_length = length)
-        except:
-            if k.lower() == 'objectid':
-                continue
-            else:
-                Exception('Failed to create field %s of type %s in table %s',(k,fieldType,table))
+        # Add fields to table.
+        # Loop through key/value pairs and create fields according to the contents
+        # of the first item in the dictionary. Default field type is text if
+        # nothing else is found.
+        for k,v in dictionaryFrame.items():
+            fieldType = 'TEXT'
+            length = 50
+            if re.findall(shapeIdentification,k):
+                continue #Skip create field if shape.
+            elif k == 'GLOBALID':
+                fieldType = 'GUID'
+            elif isinstance(v,int):
+                fieldType = 'LONG'
+            elif isinstance(v,str):
+                if len(v) > length:
+                    length = len(v)
+            elif isinstance(v,float):
+                fieldType = 'DOUBLE'
+            elif isinstance(v,datetime.datetime):
+                fieldType = 'DATE'
+            try:
+                arcpy.AddField_management(modifyTable,k,fieldType,field_length = length)
+            except:
+                if k.lower() == 'objectid':
+                    continue
+                else:
+                    Exception('Failed to create field %s of type %s in table %s',(k,fieldType,table))
 
     # Double check output fields with dictionary keys:
     tableFieldNames = [field.name for field in arcpy.ListFields(modifyTable)]
@@ -217,33 +222,34 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
 
     operationCount = 0
 
-    # Modify table:
-    if method == 'insert':
-        with arcpy.da.InsertCursor(modifyTable,dictionaryFields) as cursor:
-            for d in dictionary:
-                values = [d[key] for key in cursor.fields]
-                operationCount += 1
-                cursor.insertRow(values)
-
-    elif method == 'update':
-        with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
-            for row in cursor:
-                t = dict(zip(dictionaryFields,row))
+    with arcpy.da.Editor(workspace) as edit:
+        # Modify table:
+        if method == 'insert':
+            with arcpy.da.InsertCursor(modifyTable,dictionaryFields) as cursor:
                 for d in dictionary:
-                    if t[tableKey] == d[dictionaryKey]:
-                        operationCount += 1
-                        cursor.updateRow([d[key] for key in cursor.fields])
+                    values = [d[key] for key in cursor.fields]
+                    operationCount += 1
+                    cursor.insertRow(values)
 
-    elif method == 'delete':
-        with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
-            for row in cursor:
-                t = dict(zip(dictionaryFields,row))
-                for d in dictionary:
-                    if t[tableKey] == d[dictionaryKey]:
-                        operationCount += 1
-                        cursor.deleteRow()
-    else:
-        Exception('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
+        elif method == 'update':
+            with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
+                for row in cursor:
+                    t = dict(zip(dictionaryFields,row))
+                    for d in dictionary:
+                        if t[tableKey] == d[dictionaryKey]:
+                            operationCount += 1
+                            cursor.updateRow([d[key] for key in cursor.fields])
+
+        elif method == 'delete':
+            with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
+                for row in cursor:
+                    t = dict(zip(dictionaryFields,row))
+                    for d in dictionary:
+                        if t[tableKey] == d[dictionaryKey]:
+                            operationCount += 1
+                            cursor.deleteRow()
+        else:
+            Exception('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
 
     # Check existence of output:
     if makeTable:
@@ -256,7 +262,7 @@ def dictToTable(dictionary, table, method = 'insert', keyField = None, tableKey 
         else:
             arcpy.CopyRows_management(modifyTable,outputDataset)
 
-    arcpy.Delete_management(modifyTable)
+        arcpy.Delete_management(modifyTable)
 
     return operationCount
 
