@@ -53,7 +53,7 @@ overwriteExistingOutput = False #True allows methods to overwrite existing outpu
 class MethodException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
-        super(ValidationError, self).__init__(message)
+        super(MethodException, self).__init__(message)
 
 class UnwritableFieldException(Exception):
     def __init__(self, message):
@@ -70,7 +70,13 @@ class MissingFieldException(Exception):
         # Call the base class constructor with the parameters it needs
         super(MissingFieldException, self).__init__(message)
 
-def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = '', fields = [],makeTable = True,featureClassType = '', spatialReference = ''):
+class FieldException(Exception):
+    def __init__(self, message):
+        # Call the base class constructor with the parameters it needs
+        super(FieldException, self).__init__(message)
+
+
+def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = '', fields = [],makeTable = True, featureClass = None, featureClassType = '', spatialReference = ''):
     '''
     Method for taking a dictionary and writing the values to a given table
     assuming that dictionary keys and table fields match. Can also perform
@@ -142,8 +148,6 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     modifyTable = 'in_memory\\temporary_dataset'
     workspace = os.path.dirname(output_table)
 
-    unwritable_fields = list_unwritable_fields(output_table)
-
     if arcpy.Exists(modifyTable):
         arcpy.Delete_management(modifyTable)
 
@@ -176,11 +180,32 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     else:
         raise InputTypeException('Unknown structure for input argument [dictionary].')
 
-    # Convert dictionaries and grouped dictionaries to lists for entry as table rows:
+    # Unpack dictionaries and grouped dictionaries to lists for entry as table rows:
     if isdict:
         dictionary = [row for row in dictionary.values()]
     if isgroupeddict:
         dictionary = [item for sublist in dictionary.values() for item in sublist]
+
+    # Check integrity of fields, and create new dictionary containing only the selected fields or all fields if none are selected.
+    if fields:
+        if isinstance(fields,str):
+            fields = [fields]
+        for field in fields:
+            if not field in dictionaryFieldMappings:
+                raise MissingFieldException('Field input %s is not present in dictionary.',field)
+
+        dictionaryFieldMappings = {field:field for field in fields}
+    else:
+        # Create a mapping between the fields of the input dictionary and the actual field names of the output table.
+        dictionaryFieldMappings = {field:field for field in list(dictionaryFrame.keys())}
+
+    # Identify if feature class or not:
+    if featureClass == None:
+        featureClass = False
+        for field in dictionaryFieldMappings:
+            if re.findall(shapeIdentification,field):
+                featureClass = True
+                break
 
     if makeTable:
         # Create modifiable table. (Do not write to actual output until end of method).
@@ -194,37 +219,26 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     # Get describe object for output table.
     describe = arcpy.Describe(modifyTable)
 
-    ### Handle fields ###
-    # Check integrity of fields, and create new dictionary containing only the selected fields or all fields if none are selected.
-    if fields:
-        if isinstance(fields,str):
-            fields = [fields]
-        for field in fields:
-            if not field in dictionaryFields:
-                raise MissingFieldException('Field input %s is not present in dictionary.',field)
-
-        dictionaryFields = {field:field for field in fields}
-    else:
-        # Create a mapping between the fields of the input dictionary and the actual field names of the output table.
-        dictionaryFields = {field:field for field in list(dictionaryFrame.keys())}
+    unwritable_fields = list_unwritable_fields(output_table, describe_object = describe)
 
     # Map fields to their output counterpart:
-    featureClass = False
     orig_shape_field = ''
     orig_shape_suffix = ''
-    for field in dictionaryFields:
-
-        if re.findall(shapeIdentification,field.lower()):
-            match = re.findall(shapeIdentification,field.lower())[0]
-            featureClass = True
+    new_shape_field = ''
+    new_shape_suffix = ''
+    for field in dictionaryFieldMappings:
+        if re.findall(shapeIdentification,field):
+            match = re.findall(shapeIdentification,field)[0]
             orig_shape_field = field
             orig_shape_suffix = match[1]
+            new_shape_field = match[0]
+            new_shape_suffix = orig_shape_suffix
             if hasattr(describe,'shapeFieldName'):
-                dictionaryFields[field] = describe.shapeFieldName + orig_shape_suffix
+                dictionaryFieldMappings[field] = describe.shapeFieldName + new_shape_suffix
 
-        elif re.findall(oidIdentification,field.lower()):
+        elif re.findall(oidIdentification,field):
             if hasattr(describe,'hasOID') and describe.hasOID:
-                dictionaryFields[field] = describe.OIDFieldName
+                dictionaryFieldMappings[field] = describe.OIDFieldName
         # Add more here, if any should be applicable.
 
     # Verify feature class:
@@ -242,11 +256,8 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
                 raise InputTypeException('spatialReference argument not passed, and input dictionary shape field %s does not have a spatialReference attribute' % field)
 
     # Rename fields in dictionary and dictionaryFrame to match output table convensions:
-    dict2 = []
-    for d in dictionary:
-        dict2 += [{dictionaryFields[k]:v for k,v in d.items() if k in dictionaryFields}]
-    dictionary = dict2
-    dictionaryFrame = {dictionaryFields[k]:v for k,v in dictionaryFrame.items() if k in dictionaryFields}
+    dictionaryFrame = {dictionaryFieldMappings[k]:v for k,v in dictionaryFrame.items() if k in dictionaryFieldMappings}
+    dictionaryFields = list(dictionaryFieldMappings.values())
 
     if method == 'update':
         for d in dictionaryFields:
@@ -259,36 +270,52 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
         # of the first item in the dictionary. Default field type is text if
         # nothing else is found.
         for k,v in dictionaryFrame.items():
+            fieldType = 'TEXT'
+            length = max([50,len(str(v))])
+
             if re.findall(shapeIdentification,k):
                 continue #Skip create field if shape.
-            if re.findall(oidIdentification,k):
+            elif re.findall(oidIdentification,k):
                 continue #Skip create field if objectid.
             elif k == 'GLOBALID':
                 fieldType = 'GUID'
             elif isinstance(v,int):
                 fieldType = 'LONG'
-            elif isinstance(v,str):
-                fieldType = 'TEXT'
-                length = max([50,len(v)])
             elif isinstance(v,float):
                 fieldType = 'DOUBLE'
             elif isinstance(v,datetime.datetime):
                 fieldType = 'DATE'
+
             try:
                 arcpy.AddField_management(modifyTable,k,fieldType,field_length = length)
-            except:
-                raise MissingFieldException('Failed to create field %s of type %s in table %s',(k,fieldType,table))
+            except arcpy.ExecuteError:
+                raise FieldException('Failed to create field %s of type %s in table %s' % (k,fieldType,table))
 
     # Double check output fields with dictionary keys:
     tableFieldNames = [field.name for field in arcpy.ListFields(modifyTable)]
 
-    for field in dictionaryFields.values():
+    for i, field in enumerate(dictionaryFields):
         if not field in tableFieldNames:
-            if re.findall(shapeIdentification,field): #If shape field, get shape field name without suffix and try match again.
-                if not re.findall(shapeIdentification,field)[0][0] in tableFieldNames:
-                    raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
-            else:
-                raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
+            #Attempt to swap old shape field with new shape field:
+            if re.findall(shapeIdentification,field):
+                match_field = re.findall(shapeIdentification,field)[0][0]
+                if match_field in tableFieldNames:
+                    continue
+
+            if re.findall('^' + orig_shape_field, field):
+                new_shape_field = re.sub('^' + orig_shape_field, new_shape_field, field)
+                if new_shape_field in tableFieldNames:
+                    dictionaryFields[i] = new_shape_field
+                    continue
+
+            raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
+
+    # Remap fields in dictionary:
+    dict2 = []
+    for d in dictionary:
+        dict2 += [{dictionaryFieldMappings[k]:v for k,v in d.items() if k in dictionaryFieldMappings}]
+    dictionary = dict2
+
     ### Done handling fields ###
 
     ### Perform table operations ###
@@ -297,12 +324,14 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     with arcpy.da.Editor(workspace) as edit:
         # Modify table:
         if method == 'insert':
+           try:
             with arcpy.da.InsertCursor(modifyTable,dictionaryFields) as cursor:
                 for d in dictionary:
                     values = [d[key] for key in cursor.fields]
                     operationCount += 1
                     cursor.insertRow(values)
-
+           except:
+                pass
         elif method == 'update':
             with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
                 for row in cursor:
@@ -320,8 +349,6 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
                         if t[tableKey] == d[dictionaryKey]:
                             operationCount += 1
                             cursor.deleteRow()
-        else:
-            raise Exception('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
     ### Done performing table operations ###
 
     # Check existence of output:
@@ -455,13 +482,16 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
 
     return output
 
-def list_unwritable_fields(table):
+def list_unwritable_fields(table, describe_object = None):
     '''
     Some operations write to fields, some fields are unwritable. This methods
     lists these fields for a given table or feature class.
     '''
 
-    desc = arcpy.Describe(table)
+    if not describe_object:
+        desc = arcpy.Describe(table)
+    else:
+        desc = describe_object
 
     unwritable_fields = []
     if desc.hasOID:
