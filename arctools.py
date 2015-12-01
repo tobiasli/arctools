@@ -139,6 +139,8 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     assert not (method == 'update' and not (dictionaryKey and tableKey))
     assert not (method == 'delete' and not (dictionaryKey and tableKey))
     assert dictionary
+    if fields:
+        assert keyField in fields
 
     if not method in ['update','insert','delete']:
         raise MethodException('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
@@ -200,12 +202,33 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
         dictionaryFieldMappings = {field:field for field in list(dictionaryFrame.keys())}
 
     # Identify if feature class or not:
+    orig_shape_name = ''
+    orig_shape_field = ''
+    orig_shape_suffix = ''
     if featureClass == None:
         featureClass = False
         for field in dictionaryFieldMappings:
             if re.findall(shapeIdentification,field):
                 featureClass = True
+                match = re.findall(shapeIdentification,field)[0]
+                orig_shape_name = match[0]
+                orig_shape_suffix = match[1]
+                orig_shape_field = orig_shape_name + orig_shape_suffix
                 break
+
+    # Verify feature class:
+    if featureClass:
+        if makeTable and not featureClassType:
+            if hasattr(dictionaryFrame[orig_shape_field],'type'):
+                featureClassType = dictionaryFrame[orig_shape_field].type
+            else:
+                raise InputTypeException('featureClassType argument not passed, and input dictionary shape field %s does not have a type attribute' % field)
+
+        if makeTable and not spatialReference:
+            if hasattr(dictionaryFrame[orig_shape_field],'spatialReference'):
+                spatialReference = dictionaryFrame[orig_shape_field].spatialReference
+            else:
+                raise InputTypeException('spatialReference argument not passed, and input dictionary shape field %s does not have a spatialReference attribute' % field)
 
     if makeTable:
         # Create modifiable table. (Do not write to actual output until end of method).
@@ -222,45 +245,32 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     unwritable_fields = list_unwritable_fields(output_table, describe_object = describe)
 
     # Map fields to their output counterpart:
-    orig_shape_field = ''
-    orig_shape_suffix = ''
+    new_shape_name = ''
     new_shape_field = ''
-    new_shape_suffix = ''
+    if featureClass and hasattr(describe,'shapeFieldName'):
+        new_shape_name = describe.shapeFieldName
+        new_shape_field = new_shape_name + orig_shape_suffix
+
     for field in dictionaryFieldMappings:
         if re.findall(shapeIdentification,field):
-            match = re.findall(shapeIdentification,field)[0]
-            orig_shape_field = field
-            orig_shape_suffix = match[1]
-            new_shape_field = match[0]
-            new_shape_suffix = orig_shape_suffix
-            if hasattr(describe,'shapeFieldName'):
-                dictionaryFieldMappings[field] = describe.shapeFieldName + new_shape_suffix
+            dictionaryFieldMappings[field] = new_shape_field
+
+        elif re.findall('^' + orig_shape_name, field):
+                new_field = re.sub('^' + orig_shape_name, new_shape_name, field)
+                dictionaryFieldMappings[field] = new_field
 
         elif re.findall(oidIdentification,field):
             if hasattr(describe,'hasOID') and describe.hasOID:
                 dictionaryFieldMappings[field] = describe.OIDFieldName
-        # Add more here, if any should be applicable.
 
-    # Verify feature class:
-    if featureClass:
-        if makeTable and not featureClassType:
-            if hasattr(dictionaryFrame[orig_shape_field],'type'):
-                featureClassType = dictionaryFrame[orig_shape_field].type
-            else:
-                raise InputTypeException('featureClassType argument not passed, and input dictionary shape field %s does not have a type attribute' % field)
-
-        if makeTable and not spatialReference:
-            if hasattr(dictionaryFrame[orig_shape_field],'spatialReference'):
-                spatialReference = dictionaryFrame[orig_shape_field].spatialReference
-            else:
-                raise InputTypeException('spatialReference argument not passed, and input dictionary shape field %s does not have a spatialReference attribute' % field)
+        # Add more mapping if applicable.
 
     # Rename fields in dictionary and dictionaryFrame to match output table convensions:
     dictionaryFrame = {dictionaryFieldMappings[k]:v for k,v in dictionaryFrame.items() if k in dictionaryFieldMappings}
     dictionaryFields = list(dictionaryFieldMappings.values())
 
     if method == 'update':
-        for d in dictionaryFields:
+        for d in dictionaryFieldMappings.values():
             if d in unwritable_fields:
                 raise UnwritableFieldException('Update method on field type %s is not allowed.' % d)
 
@@ -294,27 +304,20 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     # Double check output fields with dictionary keys:
     tableFieldNames = [field.name for field in arcpy.ListFields(modifyTable)]
 
-    for i, field in enumerate(dictionaryFields):
+    for field in dictionaryFieldMappings.values():
         if not field in tableFieldNames:
-            #Attempt to swap old shape field with new shape field:
-            if re.findall(shapeIdentification,field):
-                match_field = re.findall(shapeIdentification,field)[0][0]
-                if match_field in tableFieldNames:
-                    continue
-
-            if re.findall('^' + orig_shape_field, field):
-                new_shape_field = re.sub('^' + orig_shape_field, new_shape_field, field)
-                if new_shape_field in tableFieldNames:
-                    dictionaryFields[i] = new_shape_field
-                    continue
-
-            raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
+            if not re.findall(shapeIdentification,field) or not re.findall(shapeIdentification,field)[0][0] in tableFieldNames:
+                raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
 
     # Remap fields in dictionary:
     dict2 = []
     for d in dictionary:
         dict2 += [{dictionaryFieldMappings[k]:v for k,v in d.items() if k in dictionaryFieldMappings}]
     dictionary = dict2
+
+    # Reset dictionaryKey as it may have recieved a new valuewhen dictionary keys were remapped to match output table.
+    if dictionaryKey in dictionaryFieldMappings:
+        dictionaryKey = dictionaryFieldMappings[tableKey]
 
     ### Done handling fields ###
 
@@ -324,14 +327,12 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     with arcpy.da.Editor(workspace) as edit:
         # Modify table:
         if method == 'insert':
-           try:
             with arcpy.da.InsertCursor(modifyTable,dictionaryFields) as cursor:
                 for d in dictionary:
                     values = [d[key] for key in cursor.fields]
                     operationCount += 1
                     cursor.insertRow(values)
-           except:
-                pass
+
         elif method == 'update':
             with arcpy.da.UpdateCursor(modifyTable,dictionaryFields) as cursor:
                 for row in cursor:

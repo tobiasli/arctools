@@ -32,34 +32,52 @@ class TestArctoolsModule(unittest.TestCase):
             data = arctools.tableToDict(fullpath)
             self.assertTrue(data)
 
+        # Test grouping.
+
     def test_dictToTable_method(self):
         import arctools
         import arcpy
 
-        for dataset,fields in zip(DATASETS,FIELDS):
-            fullpath = os.path.join(TEST_GDB,dataset)
-            output = fullpath + '_output'
+        try:
+            for dataset,fields in zip(DATASETS,FIELDS):
+                input = os.path.join(TEST_GDB,dataset)
+                output = input + '_output'
 
+                if arcpy.Exists(output):
+                    arcpy.Delete_management(output)
+
+                data = arctools.tableToDict(input,fields = fields)
+                self.assertTrue(data)
+                arctools.dictToTable(data,output)
+
+                # Test fail when writing to existing table or feature class:
+                try:
+                    arctools.dictToTable(data,output,method = 'insert', makeTable = True) # makeTable should be false when writing to an existing table. This should therefore fail.
+                    self.fail('arctools.dictToTable overwrote output when is should have failed.')
+                except:
+                    self.assertTrue(True) # Test is a success if the above line fails.
+
+                # Assert feature type and spatial reference:
+                in_desc = arcpy.Describe(input)
+                out_desc = arcpy.Describe(output)
+
+                self.assertTrue(in_desc.dataType == out_desc.dataType)
+                if hasattr(in_desc, 'shapeType') and hasattr(out_desc, 'shapeType'):
+                    self.assertTrue(in_desc.shapeType == out_desc.shapeType)
+                    self.assertTrue(in_desc.spatialReference.name == out_desc.spatialReference.name)
+                else:
+                    self.assertFalse(hasattr(in_desc, 'shapeType') and hasattr(out_desc, 'shapeType'))
+
+                # Test insert when writing data to table a second time (append):
+                arctools.dictToTable(data,output,method = 'insert', makeTable = False) #Duplicate contents of output table.
+                test = arctools.tableToDict(output,fields = fields)
+                self.assertTrue(test == data + data)
+
+                # Test different kinds of input data structures.
+
+        finally:
             if arcpy.Exists(output):
                 arcpy.Delete_management(output)
-
-            data = arctools.tableToDict(fullpath,fields = fields)
-            self.assertTrue(data)
-            arctools.dictToTable(data,output)
-
-            # Test fail when writing to existing table or feature class:
-            try:
-                arctools.dictToTable(data,output,method = 'insert', makeTable = True) # makeTable should be false when writing to an existing table. This should therefore fail.
-                self.fail('arctools.dictToTable overwrote output when is should have failed.')
-            except:
-                self.assertTrue(True) # Test is a success if the above line fails.
-
-            # Test insert:
-            arctools.dictToTable(data,output,method = 'insert', makeTable = False) #Duplicate contents of output table.
-            test = arctools.tableToDict(output,fields = fields)
-            self.assertTrue(test == data + data)
-
-            arcpy.Delete_management(output)
 
 def run():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestArctoolsModule)
