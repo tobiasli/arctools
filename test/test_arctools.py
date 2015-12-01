@@ -37,9 +37,8 @@ class TestArctoolsModule(unittest.TestCase):
     def test_dictToTable_method(self):
         import arctools
         import arcpy
-
-        try:
-            for dataset,fields in zip(DATASETS,FIELDS):
+        for dataset,fields in zip(DATASETS,FIELDS):
+            try:
                 input = os.path.join(TEST_GDB,dataset)
                 output = input + '_output'
 
@@ -75,9 +74,9 @@ class TestArctoolsModule(unittest.TestCase):
 
                 # Test different kinds of input data structures.
 
-        finally:
-            if arcpy.Exists(output):
-                arcpy.Delete_management(output)
+            finally:
+                if arcpy.Exists(output):
+                    arcpy.Delete_management(output)
 
 def run():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestArctoolsModule)
