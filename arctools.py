@@ -50,6 +50,10 @@ from collections import OrderedDict,Counter
 # Properties
 overwriteExistingOutput = False #True allows methods to overwrite existing output.
 
+#Regex:
+shapeIdentification = '(?i)^(shape)(@\w*)?$'
+oidIdentification = '(?i)^objectid$'
+
 class MethodException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
@@ -145,8 +149,6 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     if not method in ['update','insert','delete']:
         raise MethodException('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
 
-    shapeIdentification = '(?i)^(shape)(@\w*)$'
-    oidIdentification = '(?i)^objectid$'
     modifyTable = 'in_memory\\temporary_dataset'
     workspace = os.path.dirname(output_table)
 
@@ -315,9 +317,15 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
         dict2 += [{dictionaryFieldMappings[k]:v for k,v in d.items() if k in dictionaryFieldMappings}]
     dictionary = dict2
 
-    # Reset dictionaryKey as it may have recieved a new valuewhen dictionary keys were remapped to match output table.
-    if dictionaryKey in dictionaryFieldMappings:
-        dictionaryKey = dictionaryFieldMappings[tableKey]
+    if method in ['update', 'delete']:
+        # Reset dictionaryKey as it may have recieved a new valuewhen dictionary keys were remapped to match output table.
+        if dictionaryKey in dictionaryFieldMappings:
+            dictionaryKey = dictionaryFieldMappings[dictionaryKey]
+        if tableKey in dictionaryFieldMappings:
+            tableKey = dictionaryFieldMappings[tableKey]
+
+        if not tableKey in dictionaryFieldMappings.values():
+            raise FieldException('tableKey is not part of table')
 
     ### Done handling fields ###
 
@@ -449,6 +457,11 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
             fields = [fields]
     else:
         fields = [field.name for field in arcpy.ListFields(table)]
+        for i in range(len(fields)):
+            if re.findall(shapeIdentification, fields[i]):
+                fields[i] = fields[i] + '@' #Add @ to extract entire shape, not just simplyfied.
+                break
+
 
 # Removed following lines of code. Tool should not overwrite user input field names.
 # This should be resolved outside of the tool in the users controll.
@@ -475,7 +488,7 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
             if keyField:
                 output[dictRow[keyField]] = dictRow
             elif groupBy:
-                if not output.has_key(dictRow[groupBy]):
+                if not dictRow[groupBy] in output:
                     output[dictRow[groupBy]] = []
                 output[dictRow[groupBy]] += [dictRow]
             else:

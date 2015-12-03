@@ -15,7 +15,7 @@ TEST_GDB = os.path.join(PATH,r'bin\test.gdb')
 
 DATASETS = ['feature_class','geodatabase_table']
 FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
-            ['index', 'date', 'age', 'content']
+            ['id', 'date', 'age', 'name']
             ]
 
 METHODS = ['insert','update','delete']
@@ -47,7 +47,11 @@ class TestArctoolsModule(unittest.TestCase):
 
                 data = arctools.tableToDict(input,fields = fields)
                 self.assertTrue(data)
-                arctools.dictToTable(data,output)
+
+
+                # INSERT METHOD:
+                method = 'insert'
+                arctools.dictToTable(data,output) # default to method = 'insert'
 
                 # Test fail when writing to existing table or feature class:
                 try:
@@ -71,6 +75,19 @@ class TestArctoolsModule(unittest.TestCase):
                 arctools.dictToTable(data,output,method = 'insert', makeTable = False) #Duplicate contents of output table.
                 test = arctools.tableToDict(output,fields = fields)
                 self.assertTrue(test == data + data)
+
+                # UPDATE METHOD:
+                # All utems with ID=1 should have name = 'test_name'
+                update_data = [{'id':1,'name':'test_name'}]
+                arctools.dictToTable(update_data, output, method = 'update', keyField = 'id')
+
+                response = arctools.tableToDict(output, groupBy = 'id')
+                for id in response:
+                    for item in response[id]:
+                        if id == update_data[0]['id']:
+                            self.assertTrue(item['name'] == update_data[0]['name'])
+                        else:
+                            self.assertFalse(item['name'] == update_data[0]['name'])
 
                 # Test different kinds of input data structures.
 
