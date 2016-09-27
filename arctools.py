@@ -472,6 +472,8 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
 ##                desc = arcpy.Describe(table)
 ##                fields[index] = desc.OIDFieldName
 
+    if keyField not in fields:
+        Exception('keyField must be part of fields.')
 
     with arcpy.da.SearchCursor(table,fields,where_clause = sqlQuery) as cursor:
         for row in cursor:
