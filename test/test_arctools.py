@@ -10,8 +10,12 @@
 #-------------------------------------------------------------------------------
 import unittest
 import os
+import shutil
 PATH = os.path.dirname(__file__)
-TEST_GDB = os.path.join(PATH,r'bin\test.gdb')
+
+ORIG_GDB = os.path.join(PATH,r'bin\test.gdb')
+
+TEST_GDB = os.path.join(PATH,r'bin\current_run_test.gdb')
 
 DATASETS = ['feature_class','geodatabase_table']
 FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
@@ -21,6 +25,19 @@ FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'ti
 METHODS = ['insert','update','delete']
 
 class TestArctoolsModule(unittest.TestCase):
+
+    def setUp(self):
+        print('\nPerforming test setup.')
+        if os.path.exists(TEST_GDB):
+            shutil.rmtree(TEST_GDB)
+        shutil.copytree(ORIG_GDB,TEST_GDB)
+        print('...Done.')
+
+    def tearDown(self):
+        print('Performing test teardown.')
+        import shutil
+        shutil.rmtree(TEST_GDB)
+        print('...Done.')
 
     def test_tableToDict_method(self):
         import arctools
@@ -79,7 +96,7 @@ class TestArctoolsModule(unittest.TestCase):
                 # UPDATE METHOD:
                 # All utems with ID=1 should have name = 'test_name'
                 update_data = [{'id':1,'name':'test_name'}]
-                arctools.dictToTable(update_data, output, method = 'update', keyField = 'id')
+                arctools.dictToTable(update_data, output, method = 'update', dictionaryKey = 'id')
 
                 response = arctools.tableToDict(output, groupBy = 'id')
                 for id in response:

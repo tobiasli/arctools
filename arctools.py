@@ -80,7 +80,7 @@ class FieldException(Exception):
         super(FieldException, self).__init__(message)
 
 
-def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = '', fields = [],makeTable = True, featureClass = None, featureClassType = '', spatialReference = ''):
+def dictToTable(dictionary, table, method = 'insert', dictionaryKey = '', tableKey = '', fields = [],makeTable = True, featureClass = None, featureClassType = '', spatialReference = ''):
     '''
     Method for taking a dictionary and writing the values to a given table
     assuming that dictionary keys and table fields match. Can also perform
@@ -105,14 +105,14 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
                                     delete = Delete rows using dictionaryKey
                                              and tableKey to identify what rows
                                              to remove.
-        keyField        str     Name of the field that contains unique id's
+        dictionaryKey   str     Name of the field that contains unique id's
                                 that are matched to the values of tableKey.
                                 Data type of the field is arbitrary.
         tableKey        str     Name of the field that contains unique id's
                                 that are matched to the values of
                                 dictionaryKey. Data type of the field is
                                 arbitrary. If left out it is assumed to be the
-                                same as keyField.
+                                same as dictionaryKey.
         fields          list    List of fields from dictionary that should
                                 be entered into table. If left empty method
                                 will map all dictionary fields to table.
@@ -133,18 +133,17 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
     arcpy.env.overwriteOutput = overwriteExistingOutput
 
     output_table = table
-    dictionaryKey = keyField
+
     if not tableKey: #If fields are the same, you only need to specify one key field.
         tableKey = dictionaryKey
 
-    assert isinstance(keyField, str)
     assert isinstance(tableKey, str)
     assert isinstance(dictionaryKey, str)
     assert not (method == 'update' and not (dictionaryKey and tableKey))
     assert not (method == 'delete' and not (dictionaryKey and tableKey))
     assert dictionary
     if fields:
-        assert keyField in fields
+        assert dictionaryKey in fields
 
     if not method in ['update','insert','delete']:
         raise MethodException('Operation %s not valid. Valid options are "insert","update" and "delete".',method)
@@ -377,12 +376,7 @@ def dictToTable(dictionary, table, method = 'insert', keyField = '', tableKey = 
 
 def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [],field_case = '', ordered = False):
     '''
-    Method for creating a dictionary or a list from a table. Default to
-    list(dict(),dict(),...). If keyField is passed, the method will return
-    dict(dict(),dict(),...) with the values of keyField
-
-    If table is a feature class and fields is empty, the SHAPE@ token is used
-    to return the entire geometry.
+    Method for creating a dictionary or a list from a table.
 
     Input
           table           str     Path to the table that is converted to a
@@ -414,6 +408,16 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
     Feature:
         If field name "SHAPE" is specified, will append with @ to return entire shape.
         If field name "OBJECTID" is specified, will convert to the dataset-specific objectid field name.
+
+    Output format varies with the value of keyField (unique values) and groupdBy (non-unique values):
+    keyField = None             => list(dict(),dict(),...)
+    keyField = 'nameOfField'    => dict(dict(),dict(),...)    (Using the values of 'nameOfField' as dict keys).
+    groupBy = 'nameOfOtherField'=> dict( list(dict(), dict()...), list(dict(),dict()...)...)   (Using the values of nameOfOtherField as dict keys containing a list of matching dictionaries)
+
+    When fields = [], all fields will be included in output. This includes the
+    SHAPE-field if the table is a feature class. In this case, '@' is appended
+    to the shape field name so as to include the entire geometry.
+
     '''
 
     arcpy.env.overwriteOutput = overwriteExistingOutput
@@ -461,7 +465,6 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
             if re.findall(shapeIdentification, fields[i]):
                 fields[i] = fields[i] + '@' #Add @ to extract entire shape, not just simplyfied.
                 break
-
 
 # Removed following lines of code. Tool should not overwrite user input field names.
 # This should be resolved outside of the tool in the users controll.
