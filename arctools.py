@@ -45,6 +45,8 @@ import arcpy
 import time
 import random
 import warnings
+import numpy
+from scipy import ndimage
 from collections import OrderedDict,Counter
 
 # Properties
@@ -500,6 +502,39 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
                 output += [dictRow]
 
     return output
+
+def zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
+    '''Calculation of  zonal statistics via arcpy is very slow if it is an
+    operation that needs to be calculated many times over. This method uses
+    arcpy for data loading, but performs the zonal statistics using
+    scipy-ndimage, which is at least 50x faster.
+
+    First version only handles accepts pre-aligned numpy arrays of values and zones.
+
+    RETURNS: dictionary containing the values calculated by method, with
+    unieuq zone_array values as keys.
+    '''
+
+    methods = { 'mean': ndimage.mean,
+                'sum': ndimage.sum,
+                'max': ndimage.maximum,
+                'min': ndimage.minimum}
+
+    assert isinstance(value_array, numpy.numarray)
+    assert isinstance(zone_array, numpy.numarray)
+    assert method in methods
+
+    aggregation_method = methods[method]
+
+    unique_groups = numpy.unique(zone_array[~numpy.isnan(zone_array)])
+
+    mask = ~numpy.isnan(zone_array)
+    mask[mask==numpy.isnan(value_array)] = False # Mask is now the intersect between all non-nan cells of value_array and zone_array
+    mean = aggregation_method(  value_array[mask],
+                                zone_array[mask],
+                                unique_groups)
+
+    results = {k:v for k,v in zip(unique_groups, mean)}
 
 def list_unwritable_fields(table, describe_object = None):
     '''
