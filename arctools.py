@@ -38,13 +38,13 @@ Copyright:  (c) Tobias Litherland 2014, 2015
 
 -------------------------------------------------------------------------------
 '''
-import os
+
 import re
 import datetime
 import arcpy
 import time
-import random
-import warnings
+import os
+
 import numpy
 from scipy import ndimage
 from collections import OrderedDict,Counter
@@ -52,29 +52,34 @@ from collections import OrderedDict,Counter
 # Properties
 overwriteExistingOutput = False #True allows methods to overwrite existing output.
 
-#Regex:
+# Regex:
 shapeIdentification = '(?i)^(shape)(@\w*)?$'
 oidIdentification = '(?i)^objectid$'
+
 
 class MethodException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
         super(MethodException, self).__init__(message)
 
+
 class UnwritableFieldException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
         super(UnwritableFieldException, self).__init__(message)
 
+
 class InputTypeException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
-        super(InputStructureException, self).__init__(message)
+        super(InputTypeException, self).__init__(message)
+
 
 class MissingFieldException(Exception):
     def __init__(self, message):
         # Call the base class constructor with the parameters it needs
         super(MissingFieldException, self).__init__(message)
+
 
 class FieldException(Exception):
     def __init__(self, message):
@@ -82,7 +87,25 @@ class FieldException(Exception):
         super(FieldException, self).__init__(message)
 
 
-def dictToTable(dictionary, table, method = 'insert', dictionaryKey = '', tableKey = '', fields = [],makeTable = True, featureClass = None, featureClassType = '', spatialReference = ''):
+def _check_out_arcgis_license(lic='Spatial'):
+    """Check if any Spatial Analyst Licenses are available. If so, check one out."""
+
+    class LicenseError(Exception):
+        pass
+
+    if arcpy.CheckExtension(lic) == "Available":
+        arcpy.CheckOutExtension(lic)
+    else:
+        # raise a custom exception
+        raise LicenseError("Need {0} license".format(lic))
+
+
+def _check_in_arcgis_licence(lic='Spatial'):
+    """ Return an outchecket License. """
+    arcpy.CheckInExtension(lic)
+
+
+def dictToTable(dictionary, table, method='insert', dictionaryKey='', tableKey='', fields=[], makeTable=True, featureClass=None, featureClassType='', spatialReference=''):
     '''
     Method for taking a dictionary and writing the values to a given table
     assuming that dictionary keys and table fields match. Can also perform
@@ -309,7 +332,7 @@ def dictToTable(dictionary, table, method = 'insert', dictionaryKey = '', tableK
 
     for field in dictionaryFieldMappings.values():
         if not field in tableFieldNames:
-            if not re.findall(shapeIdentification,field) or not re.findall(shapeIdentification,field)[0][0] in tableFieldNames:
+            if not re.findall(shapeIdentification, field) or not re.findall(shapeIdentification,field)[0][0] in tableFieldNames:
                 raise MissingFieldException('Dictionary field %s is not present in table %s.' % (field,output_table))
 
     # Remap fields in dictionary:
@@ -376,7 +399,8 @@ def dictToTable(dictionary, table, method = 'insert', dictionaryKey = '', tableK
 
     return operationCount
 
-def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [],field_case = '', ordered = False):
+
+def tableToDict(table, sqlQuery='', keyField=None, groupBy=None, fields=[], field_case='', ordered=False):
     '''
     Method for creating a dictionary or a list from a table.
 
@@ -424,6 +448,8 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
 
     arcpy.env.overwriteOutput = overwriteExistingOutput
 
+    table_desc = arcpy.Describe(table)
+
     output = list()
 
     if keyField and groupBy:
@@ -438,12 +464,12 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
         output = dict_func()
 
     if keyField:
-        #Check if contents of field is unique:
-        uniqueList = []
-        with arcpy.da.SearchCursor(table,keyField,where_clause = sqlQuery) as cursor:
+        # Check if contents of field is unique:
+        unique_list = []
+        with arcpy.da.SearchCursor(table, keyField, where_clause=sqlQuery) as cursor:
             for row in cursor:
-                uniqueList += row
-        if not len(set(uniqueList)) == len(uniqueList):
+                unique_list += row
+        if not len(set(unique_list)) == len(unique_list):
             Exception('When keyField is used as input, the column needs to have unique values. To group rows by the contents of a column, use groupBy.')
 
     if keyField and field_case:
@@ -458,29 +484,26 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
         elif field_case == 'lower':
             groupBy = groupBy.lower()
 
+    table_fields = [f.name for f in arcpy.ListFields(table)]
     if fields:
-        if isinstance(fields,str):
+        if isinstance(fields, str):
             fields = [fields]
+        for field in fields:
+            if field not in table_fields:
+                if table_desc.datasetType == 'FeatureClass' and not (table_desc.shapeFieldName in field or table_desc.shapeFieldName.upper() in field.upper()):
+                    raise MissingFieldException('Field [%s] not found in %s' % (field, table))
     else:
         fields = [field.name for field in arcpy.ListFields(table)]
-        for i in range(len(fields)):
-            if re.findall(shapeIdentification, fields[i]):
-                fields[i] = fields[i] + '@' #Add @ to extract entire shape, not just simplyfied.
-                break
-
-# Removed following lines of code. Tool should not overwrite user input field names.
-# This should be resolved outside of the tool in the users controll.
-##        for index,field in enumerate(fields):
-##            if field.lower() == 'shape':
-##                fields[index] = field + '@'
-##            if field.lower() == 'objectid':
-##                desc = arcpy.Describe(table)
-##                fields[index] = desc.OIDFieldName
+        if table_desc.datasetType == 'FeatureClass':
+            for i in range(len(fields)):
+                if fields[i] == table_desc.shapeFieldName:
+                    fields[i] += '@'  # Add @ to extract entire shape, not just simplyfied.
+                    break
 
     if keyField not in fields:
         Exception('keyField must be part of fields.')
 
-    with arcpy.da.SearchCursor(table,fields,where_clause = sqlQuery) as cursor:
+    with arcpy.da.SearchCursor(table, fields, where_clause=sqlQuery) as cursor:
         for row in cursor:
 
             case_fields = fields
@@ -490,21 +513,69 @@ def tableToDict(table,sqlQuery = '', keyField = None, groupBy = None, fields = [
             elif field_case == 'lower':
                 case_fields = [f.lower() for f in fields]
 
-            dictRow = dict_func(zip(case_fields,row))
+            dict_row = dict_func(zip(case_fields, row))
 
             if keyField:
-                output[dictRow[keyField]] = dictRow
+                output[dict_row[keyField]] = dict_row
             elif groupBy:
-                if not dictRow[groupBy] in output:
-                    output[dictRow[groupBy]] = []
-                output[dictRow[groupBy]] += [dictRow]
+                if not dict_row[groupBy] in output:
+                    output[dict_row[groupBy]] = []
+                output[dict_row[groupBy]] += [dict_row]
             else:
-                output += [dictRow]
+                output += [dict_row]
 
     return output
 
-def zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
-    '''Calculation of  zonal statistics via arcpy is very slow if it is an
+
+def zonal_statistics_as_dict(value_raster, zone_data, method='mean', zone_key_field=''):
+    """Calculate the zonal statistics between to seperate datasets. Accepts zone data as both raster and polygon data.
+
+    RETURNS: dictionary containing the values calculated by metod, with unique zone_data values as keys.
+    """
+
+
+
+    # Set the loaded raster as snapRaster:
+    arcpy.env.snapRaster = str(value_raster)
+    arcpy.env.extent = arcpy.Describe(value_raster).extent
+    value_desc = arcpy.Describe(value_raster)
+
+
+    # Convert to raster if zone is polygon:
+    zone_data_desc = arcpy.Describe(zone_data)
+    if zone_data_desc.datasetType == 'FeatureClass':
+        assert zone_key_field
+        zone_raster = arcpy.PolygonToRaster_conversion(zone_data, value_field=zone_key_field, cellsize=value_desc.meanCellHeight)
+    elif zone_data_desc.datasetType == 'RasterDataset':
+        zone_raster = zone_data
+    else:
+        raise InputTypeException('The provided zone_data is not a supported data format.')
+
+    zone_desc = arcpy.Describe(zone_raster)
+
+    assert value_desc.extent.lowerLeft.Y == zone_desc.extent.lowerLeft.Y
+    assert value_desc.extent.lowerLeft.X == zone_desc.extent.lowerLeft.X
+    assert value_desc.spatialReference.PCSCode == zone_desc.spatialReference.PCSCode
+    assert value_desc.spatialReference.GCSCode == zone_desc.spatialReference.GCSCode
+    assert value_desc.meanCellHeight == zone_desc.meanCellHeight
+    assert value_desc.meanCellWidth == zone_desc.meanCellWidth
+
+    value = arcpy.RasterToNumPyArray(str(value_raster))
+    value = value.astype('float64')
+    value[value == value_desc.noDataValue] = None
+    zone = arcpy.RasterToNumPyArray(str(zone_raster))
+    if zone.dtype is arcpy.numpy.dtype('uint8'):
+        zone = zone.astype('float64')
+        zone[zone == 255] = None
+    else:
+        zone = zone.astype('float64')
+        zone[zone == zone_desc.noDataValue] = None
+
+    return _zonal_statistics_as_dict(value, zone, method)
+
+
+def _zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
+    """Calculation of  zonal statistics via arcpy is very slow if it is an
     operation that needs to be calculated many times over. This method uses
     arcpy for data loading, but performs the zonal statistics using
     scipy-ndimage, which is at least 50x faster.
@@ -512,16 +583,17 @@ def zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
     First version only handles accepts pre-aligned numpy arrays of values and zones.
 
     RETURNS: dictionary containing the values calculated by method, with
-    unieuq zone_array values as keys.
-    '''
+    unieuq zone_array values as keys."""
 
-    methods = { 'mean': ndimage.mean,
-                'sum': ndimage.sum,
-                'max': ndimage.maximum,
-                'min': ndimage.minimum}
+    _check_out_arcgis_license()
 
-    assert isinstance(value_array, numpy.numarray)
-    assert isinstance(zone_array, numpy.numarray)
+    methods = {'mean': ndimage.mean,
+               'sum': ndimage.sum,
+               'max': ndimage.maximum,
+               'min': ndimage.minimum}
+
+    assert isinstance(value_array, numpy.ndarray)
+    assert isinstance(zone_array, numpy.ndarray)
     assert method in methods
 
     aggregation_method = methods[method]
@@ -529,18 +601,23 @@ def zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
     unique_groups = numpy.unique(zone_array[~numpy.isnan(zone_array)])
 
     mask = ~numpy.isnan(zone_array)
-    mask[mask==numpy.isnan(value_array)] = False # Mask is now the intersect between all non-nan cells of value_array and zone_array
-    mean = aggregation_method(  value_array[mask],
-                                zone_array[mask],
-                                unique_groups)
+    mask[mask == numpy.isnan(value_array)] = False  # Mask is now the intersect between all non-nan cells.
+    mean = aggregation_method(value_array[mask],
+                              zone_array[mask],
+                              unique_groups)
 
-    results = {k:v for k,v in zip(unique_groups, mean)}
+    results = {k: v for k, v in zip(unique_groups, mean)}
+
+    _check_in_arcgis_licence()
+
+    return results
+
 
 def list_unwritable_fields(table, describe_object = None):
-    '''
+    """
     Some operations write to fields, some fields are unwritable. This methods
     lists these fields for a given table or feature class.
-    '''
+    """
 
     if not describe_object:
         desc = arcpy.Describe(table)

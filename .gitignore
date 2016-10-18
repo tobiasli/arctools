@@ -1,2 +1,4 @@
 ﻿## Ignore certain files in project.
 *.pyc
+ideas/
+.cache/

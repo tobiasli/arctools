@@ -11,18 +11,22 @@
 import unittest
 import os
 import shutil
+import arctools
+
 PATH = os.path.dirname(__file__)
 
-ORIG_GDB = os.path.join(PATH,r'bin\test.gdb')
+ORIG_GDB = os.path.join(PATH, r'bin\test.gdb')
 
-TEST_GDB = os.path.join(PATH,r'bin\current_run_test.gdb')
+TEST_GDB = os.path.join(PATH, r'bin\current_run_test.gdb')
 
-DATASETS = ['feature_class','geodatabase_table']
-FIELDS = [  ['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
-            ['id', 'date', 'age', 'name']
-            ]
+DATASETS = ['feature_class', 'feature_class_overlapping', 'geodatabase_table']
+FIELDS = [['id', 'weight', 'SHAPE@', 'name', 'SHAPE_Length', 'SHAPE_Area', 'time_and_date'],
+          ['id', 'SHAPE@', 'SHAPE_Length', 'SHAPE_Area'],
+          ['id', 'date', 'age', 'name']
+          ]
 
-METHODS = ['insert','update','delete']
+METHODS = ['insert', 'update', 'delete']
+
 
 class TestArctoolsModule(unittest.TestCase):
 
@@ -30,18 +34,36 @@ class TestArctoolsModule(unittest.TestCase):
         print('\nPerforming test setup.')
         if os.path.exists(TEST_GDB):
             shutil.rmtree(TEST_GDB)
-        shutil.copytree(ORIG_GDB,TEST_GDB)
-        print('...Done.')
+        shutil.copytree(ORIG_GDB, TEST_GDB)
+        print('Performing test setup. ...Done.')
 
     def tearDown(self):
         print('Performing test teardown.')
-        import shutil
         shutil.rmtree(TEST_GDB)
-        print('...Done.')
+        print('Performing test teardown. ...Done.')
+
+    def test_zonal_statistics_as_dict(self):
+        temp_raster = os.path.join('in_memory', 'temp_raster')
+        if arctools.arcpy.Exists(temp_raster):
+            arctools.arcpy.Delete(temp_raster)
+        value_raster = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Area', out_rasterdataset=temp_raster, cellsize=1000)
+
+        # Polygon zonal:
+        results = arctools.zonal_statistics_as_dict(value_raster=value_raster,
+                                                    zone_data=os.path.join(TEST_GDB, DATASETS[0]),
+                                                    zone_key_field='OBJECTID')
+
+        self.assertTrue(results == {1.0: 83727707.139100626, 2.0: 107970456.89293019, 3.0: 106816507.34451807})
+
+        # Raster zonal:
+        results = arctools.zonal_statistics_as_dict(value_raster=value_raster,
+                                                    zone_data=value_raster,
+                                                    zone_key_field='OBJECTID')
+
+        self.assertTrue(results == {34059634.472718053: 34059634.47271803, 76936293.533665821: 76936293.533665732, 122752621.37697256: 122752621.37697232})
+
 
     def test_tableToDict_method(self):
-        import arctools
-        import arcpy
 
         for dataset in DATASETS:
             fullpath = os.path.join(TEST_GDB,dataset)
@@ -52,34 +74,32 @@ class TestArctoolsModule(unittest.TestCase):
         # Test grouping.
 
     def test_dictToTable_method(self):
-        import arctools
-        import arcpy
-        for dataset,fields in zip(DATASETS,FIELDS):
+
+        for dataset, fields in [(DATASETS[i], FIELDS[i]) for i in [0, 2]]:
             try:
-                input = os.path.join(TEST_GDB,dataset)
+                input = os.path.join(TEST_GDB, dataset)
                 output = input + '_output'
 
-                if arcpy.Exists(output):
-                    arcpy.Delete_management(output)
+                if arctools.arcpy.Exists(output):
+                    arctools.arcpy.Delete_management(output)
 
-                data = arctools.tableToDict(input,fields = fields)
+                data = arctools.tableToDict(input, fields=fields)
                 self.assertTrue(data)
-
 
                 # INSERT METHOD:
                 method = 'insert'
-                arctools.dictToTable(data,output) # default to method = 'insert'
+                arctools.dictToTable(data, output)  # default to method = 'insert'
 
                 # Test fail when writing to existing table or feature class:
                 try:
-                    arctools.dictToTable(data,output,method = 'insert', makeTable = True) # makeTable should be false when writing to an existing table. This should therefore fail.
+                    arctools.dictToTable(data, output, method='insert', makeTable=True)  # makeTable should be false when writing to an existing table. This should therefore fail.
                     self.fail('arctools.dictToTable overwrote output when is should have failed.')
                 except:
-                    self.assertTrue(True) # Test is a success if the above line fails.
+                    self.assertTrue(True)  # Test is a success if the above line fails.
 
                 # Assert feature type and spatial reference:
-                in_desc = arcpy.Describe(input)
-                out_desc = arcpy.Describe(output)
+                in_desc = arctools.arcpy.Describe(input)
+                out_desc = arctools.arcpy.Describe(output)
 
                 self.assertTrue(in_desc.dataType == out_desc.dataType)
                 if hasattr(in_desc, 'shapeType') and hasattr(out_desc, 'shapeType'):
@@ -109,8 +129,8 @@ class TestArctoolsModule(unittest.TestCase):
                 # Test different kinds of input data structures.
 
             finally:
-                if arcpy.Exists(output):
-                    arcpy.Delete_management(output)
+                if arctools.arcpy.Exists(output):
+                    arctools.arcpy.Delete_management(output)
 
 def run():
     suite = unittest.TestLoader().loadTestsFromTestCase(TestArctoolsModule)
