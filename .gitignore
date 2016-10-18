@@ -2,3 +2,4 @@
 *.pyc
 .idea/*
 .cache/*
+test/bin/test.gdb/*sr.lock
