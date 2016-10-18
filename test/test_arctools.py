@@ -48,19 +48,25 @@ class TestArctoolsModule(unittest.TestCase):
             arctools.arcpy.Delete(temp_raster)
         value_raster = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Area', out_rasterdataset=temp_raster, cellsize=1000)
 
-        # Polygon zonal:
-        results = arctools.zonal_statistics_as_dict(value_raster=value_raster,
+        # Raster value, Polygon zonal:
+        results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=os.path.join(TEST_GDB, DATASETS[0]),
                                                     zone_key_field='OBJECTID')
 
         self.assertTrue(results == {1.0: 83727707.139100626, 2.0: 107970456.89293019, 3.0: 106816507.34451807})
 
-        # Raster zonal:
-        results = arctools.zonal_statistics_as_dict(value_raster=value_raster,
+        # Raster value, Raster zonal:
+        results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=value_raster,
                                                     zone_key_field='OBJECTID')
 
         self.assertTrue(results == {34059634.472718053: 34059634.47271803, 76936293.533665821: 76936293.533665732, 122752621.37697256: 122752621.37697232})
+
+        # Polygon value, Raster zonal:
+        results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
+                                                    zone_data=value_raster,
+                                                    method='sum',
+                                                    value_key_field='OBJECTID')
 
 
     def test_tableToDict_method(self):

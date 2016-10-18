@@ -527,42 +527,75 @@ def tableToDict(table, sqlQuery='', keyField=None, groupBy=None, fields=[], fiel
     return output
 
 
-def zonal_statistics_as_dict(value_raster, zone_data, method='mean', zone_key_field=''):
+def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_field='', zone_key_field=''):
     """Calculate the zonal statistics between to seperate datasets. Accepts zone data as both raster and polygon data.
 
     RETURNS: dictionary containing the values calculated by metod, with unique zone_data values as keys.
     """
 
+    accepted_types = ['FeatureClass', 'RasterDataset']
 
+    zone_data_desc = arcpy.Describe(zone_data)
+    value_data_desc = arcpy.Describe(value_data)
+
+    # Input check:
+    if value_data_desc.datasetType not in accepted_types:
+        raise InputTypeException('value_data of type %s is not an accepted data type' % value_data_desc.datasetType)
+    if zone_data_desc.datasetType not in accepted_types:
+        raise InputTypeException('zone_data of type %s is not an accepted data type' % zone_data_desc.datasetType)
+    if value_data_desc.datasetType == 'FeatureClass' and not value_key_field:
+        raise InputTypeException('value_data is type FeatureClass, but value_key_field is empty.')
+    if zone_data_desc.datasetType == 'FeatureClass' and not zone_key_field:
+        raise InputTypeException('zone_data is type FeatureClass, but zone_key_field is empty.')
+    if not (value_data_desc.datasetType == 'RasterDataset' or zone_data_desc.datasetType == 'RasterDataset'):
+        raise InputTypeException('One of input types must be a raster')
 
     # Set the loaded raster as snapRaster:
-    arcpy.env.snapRaster = str(value_raster)
-    arcpy.env.extent = arcpy.Describe(value_raster).extent
-    value_desc = arcpy.Describe(value_raster)
+    if value_data_desc.datasetType == 'RasterDataset':
+        frame_raster = value_data
+        frame_desc = value_data_desc
+    elif zone_data_desc.datasetType == 'RasterDataset':
+        frame_raster = zone_data
+        frame_desc = zone_data_desc
 
+    arcpy.env.snapRaster = str(frame_raster)
+    arcpy.env.extent = arcpy.Describe(frame_raster).extent
+
+    # Convert to raster if value is polygon:
+    if value_data_desc.datasetType == 'RasterDataset':
+        value_raster = value_data
+    elif value_data_desc.datasetType == 'FeatureClass':
+        value_raster = arcpy.PolygonToRaster_conversion(value_data, value_field=value_key_field, cellsize=frame_desc.meanCellHeight)
+    else:
+        raise InputTypeException('The provided zone_data is not a supported data format.')
 
     # Convert to raster if zone is polygon:
-    zone_data_desc = arcpy.Describe(zone_data)
-    if zone_data_desc.datasetType == 'FeatureClass':
-        assert zone_key_field
-        zone_raster = arcpy.PolygonToRaster_conversion(zone_data, value_field=zone_key_field, cellsize=value_desc.meanCellHeight)
-    elif zone_data_desc.datasetType == 'RasterDataset':
+    if zone_data_desc.datasetType == 'RasterDataset':
         zone_raster = zone_data
+    elif zone_data_desc.datasetType == 'FeatureClass':
+        zone_raster = arcpy.PolygonToRaster_conversion(zone_data, value_field=zone_key_field, cellsize=frame_desc.meanCellHeight)
     else:
         raise InputTypeException('The provided zone_data is not a supported data format.')
 
     zone_desc = arcpy.Describe(zone_raster)
+    value_desc = arcpy.Describe(value_raster)
 
-    assert value_desc.extent.lowerLeft.Y == zone_desc.extent.lowerLeft.Y
-    assert value_desc.extent.lowerLeft.X == zone_desc.extent.lowerLeft.X
+    # Assert that resulting rasters align:
     assert value_desc.spatialReference.PCSCode == zone_desc.spatialReference.PCSCode
     assert value_desc.spatialReference.GCSCode == zone_desc.spatialReference.GCSCode
+    assert value_desc.extent.lowerLeft.Y == zone_desc.extent.lowerLeft.Y
+    assert value_desc.extent.lowerLeft.X == zone_desc.extent.lowerLeft.X
     assert value_desc.meanCellHeight == zone_desc.meanCellHeight
     assert value_desc.meanCellWidth == zone_desc.meanCellWidth
 
     value = arcpy.RasterToNumPyArray(str(value_raster))
-    value = value.astype('float64')
-    value[value == value_desc.noDataValue] = None
+    if value.dtype is arcpy.numpy.dtype('uint8'):
+        value = value.astype('float64')
+        value[value == 255] = None
+    else:
+        value = value.astype('float64')
+        value[value == value_desc.noDataValue] = None
+
     zone = arcpy.RasterToNumPyArray(str(zone_raster))
     if zone.dtype is arcpy.numpy.dtype('uint8'):
         zone = zone.astype('float64')
