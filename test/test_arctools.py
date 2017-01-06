@@ -76,7 +76,7 @@ class TestArctoolsModule(unittest.TestCase):
                                                     method=['mean', 'sum'],
                                                     zone_key_field='OBJECTID')
 
-        self.assertTrue(results == {34059634.472718053: {'id': 34059634.472718053, 'sum': 28.0, 'mean': 1.1200000000000001}, 76936293.533665821: {'id': 76936293.533665821, 'sum': 24.0, 'mean': 3.0}, 122752621.37697256: {'id': 122752621.37697256, 'sum': 103.0, 'mean': 1.7758620689655173}})
+        self.assertTrue(results == {1: {'sum': 23632.886, 'mean': 0.0010825648754691818, 'OBJECTID': 1}, 2: {'sum': 23632.886, 'mean': 0.009181874117074926, 'OBJECTID': 2}, 3: {'sum': 34102.252, 'mean': 0.004449951349145824, 'OBJECTID': 3}, 4: {'sum': 57518.94, 'mean': 0.0020576288672450736, 'OBJECTID': 4}, 5: {'sum': 57518.94, 'mean': 0.0037129196933174385, 'OBJECTID': 5}, 6: {'sum': 57518.94, 'mean': 0.0033706004855966636, 'OBJECTID': 6}})
 
     def test_tableToDict_method(self):
         for dataset in DATASETS:
