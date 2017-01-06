@@ -53,14 +53,14 @@ class TestArctoolsModule(unittest.TestCase):
                                                     zone_data=os.path.join(TEST_GDB, DATASETS[0]),
                                                     zone_key_field='OBJECTID')
 
-        self.assertTrue(results == {1.0: 83727707.139100626, 2.0: 107970456.89293019, 3.0: 106816507.34451807})
+        self.assertTrue(results == {1.0: {'mean': 83727707.139100626, 'OBJECTID': 1.0}, 2.0: {'mean': 107970456.89293019, 'OBJECTID': 2.0}, 3.0: {'mean': 106816507.34451807, 'OBJECTID': 3.0}})
 
         # Raster value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=value_raster,
                                                     zone_key_field='OBJECTID')
 
-        self.assertTrue(results == {34059634.472718053: 34059634.47271803, 76936293.533665821: 76936293.533665732, 122752621.37697256: 122752621.37697232})
+        self.assertTrue(results == {34059634.472718053: {'mean': 34059634.47271803, 'OBJECTID': 34059634.472718053}, 76936293.533665821: {'mean': 76936293.533665732, 'OBJECTID': 76936293.533665821}, 122752621.37697256: {'mean': 122752621.37697232, 'OBJECTID': 122752621.37697256}})
 
         # Polygon value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
@@ -68,16 +68,26 @@ class TestArctoolsModule(unittest.TestCase):
                                                     method='sum',
                                                     value_key_field='OBJECTID')
 
+        self.assertTrue(results == {34059634.472718053: {'id': 34059634.472718053, 'sum': 28.0}, 76936293.533665821: {'id': 76936293.533665821, 'sum': 24.0}, 122752621.37697256: {'id': 122752621.37697256, 'sum': 103.0}})
+
+        # Polygon value, raster zonal: Multiple methods:
+        results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
+                                                    zone_data=value_raster,
+                                                    method=['mean', 'sum'],
+                                                    value_key_field='OBJECTID')
+
+        self.assertTrue(results == {34059634.472718053: {'id': 34059634.472718053, 'sum': 28.0, 'mean': 1.1200000000000001}, 76936293.533665821: {'id': 76936293.533665821, 'sum': 24.0, 'mean': 3.0}, 122752621.37697256: {'id': 122752621.37697256, 'sum': 103.0, 'mean': 1.7758620689655173}})
+
 
     def test_tableToDict_method(self):
-
         for dataset in DATASETS:
-            fullpath = os.path.join(TEST_GDB,dataset)
+            fullpath = os.path.join(TEST_GDB, dataset)
 
             data = arctools.tableToDict(fullpath)
             self.assertTrue(data)
 
-        # Test grouping.
+            # Test grouping.
+            # TODO
 
     def test_dictToTable_method(self):
 

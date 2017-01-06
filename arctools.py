@@ -159,11 +159,12 @@ def dictToTable(dictionary, table, method='insert', dictionaryKey='', tableKey='
 
     output_table = table
 
-    if not tableKey: #If fields are the same, you only need to specify one key field.
-        tableKey = dictionaryKey
-
     assert isinstance(tableKey, str)
     assert isinstance(dictionaryKey, str)
+
+    if not tableKey:  # If fields are the same, you only need to specify one key field.
+        tableKey = dictionaryKey
+
     assert not (method == 'update' and not (dictionaryKey and tableKey))
     assert not (method == 'delete' and not (dictionaryKey and tableKey))
     assert dictionary
@@ -531,6 +532,11 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
     """Calculate the zonal statistics between to seperate datasets. Accepts zone data as both raster and polygon data.
 
     RETURNS: dictionary containing the values calculated by metod, with unique zone_data values as keys.
+
+    The Zonal data is the most important in terms of geographical extent, therefore we always assume that this is ground
+    proof. Any spatial adjustments are therefore done to the value data, in terms of extent. This means that if zone
+    data is polygonal of origin, we convert the value data to polygon, and perform an intersect. If the zone data is
+    raster, we convert both to matching extent raster datasets.
     """
 
     accepted_types = ['FeatureClass', 'RasterDataset']
@@ -551,12 +557,15 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
         raise InputTypeException('One of input types must be a raster')
 
     # Set the loaded raster as snapRaster:
-    if value_data_desc.datasetType == 'RasterDataset':
-        frame_raster = value_data
-        frame_desc = value_data_desc
-    elif zone_data_desc.datasetType == 'RasterDataset':
+    if zone_data_desc.datasetType == 'RasterDataset':
         frame_raster = zone_data
         frame_desc = zone_data_desc
+    elif value_data_desc.datasetType == 'RasterDataset':
+        frame_raster = value_data
+        frame_desc = value_data_desc
+
+    if zone_data_desc.datasetType == 'FeatureClass' and frame_desc.meanCellHeight > 10:
+        raise InputTypeException('Raster resolution is too poor. Zone precision will be hampered.')
 
     arcpy.env.snapRaster = str(frame_raster)
     arcpy.env.extent = arcpy.Describe(frame_raster).extent
@@ -604,10 +613,13 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
         zone = zone.astype('float64')
         zone[zone == zone_desc.noDataValue] = None
 
-    return _zonal_statistics_as_dict(value, zone, method)
+    if not zone_key_field:
+        zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+
+    return _zonal_statistics_as_dict(value, zone, method, zone_key_field)
 
 
-def _zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
+def _zonal_statistics_as_dict(value_array, zone_array, methods='mean', zone_key_field='id'):
     """Calculation of  zonal statistics via arcpy is very slow if it is an
     operation that needs to be calculated many times over. This method uses
     arcpy for data loading, but performs the zonal statistics using
@@ -616,37 +628,45 @@ def _zonal_statistics_as_dict(value_array, zone_array, method = 'mean'):
     First version only handles accepts pre-aligned numpy arrays of values and zones.
 
     RETURNS: dictionary containing the values calculated by method, with
-    unieuq zone_array values as keys."""
+    unique zone_array values as keys."""
 
     _check_out_arcgis_license()
 
-    methods = {'mean': ndimage.mean,
-               'sum': ndimage.sum,
-               'max': ndimage.maximum,
-               'min': ndimage.minimum}
+    if not isinstance(methods, list):
+        methods = [methods]
+
+    valid_methods = {'mean': ndimage.mean,
+                     'sum': ndimage.sum,
+                     'max': ndimage.maximum,
+                     'min': ndimage.minimum}
 
     assert isinstance(value_array, numpy.ndarray)
     assert isinstance(zone_array, numpy.ndarray)
-    assert method in methods
-
-    aggregation_method = methods[method]
+    for m in methods:
+        if m not in valid_methods:
+            print(m)
+        assert m in valid_methods
 
     unique_groups = numpy.unique(zone_array[~numpy.isnan(zone_array)])
 
     mask = ~numpy.isnan(zone_array)
     mask[mask == numpy.isnan(value_array)] = False  # Mask is now the intersect between all non-nan cells.
-    mean = aggregation_method(value_array[mask],
-                              zone_array[mask],
-                              unique_groups)
 
-    results = {k: v for k, v in zip(unique_groups, mean)}
+    dictionary = {zone: {zone_key_field: zone} for zone in unique_groups}
+    for m in methods:
+        results = valid_methods[m](value_array[mask],
+                                   zone_array[mask],
+                                   unique_groups)
+
+        for i, zone in enumerate(dictionary):
+            dictionary[zone][m] = results[i]
 
     _check_in_arcgis_licence()
 
-    return results
+    return dictionary
 
 
-def list_unwritable_fields(table, describe_object = None):
+def list_unwritable_fields(table, describe_object=None):
     """
     Some operations write to fields, some fields are unwritable. This methods
     lists these fields for a given table or feature class.
@@ -666,7 +686,8 @@ def list_unwritable_fields(table, describe_object = None):
 
     return unwritable_fields
 
-def create_filled_contours(raster,output_feature_class,explicit_contour_list,create_complete_polygons = False,raster_edge_crop_distance = 10):
+
+def create_filled_contours(raster, output_feature_class, explicit_contour_list, create_complete_polygons=False, raster_edge_crop_distance=10):
 
     '''
     Method for creating filled contours for a specified list of contours.
@@ -805,7 +826,8 @@ def create_filled_contours(raster,output_feature_class,explicit_contour_list,cre
     else:
         arcpy.CopyFeatures_management(polygons_raw,output_feature_class)
 
-def changeFieldOrder(table,newTable,orderedFieldList):
+
+def changeFieldOrder(table, newTable, orderedFieldList):
     '''
     This method can reorder the fields in a table. All fields in
     orderedFieldList must exist in the table, and the method then changes the

@@ -3,3 +3,4 @@
 .idea/*
 .cache/*
 test/bin/test.gdb/*sr.lock
+test/bin/current_run_test.gdb
