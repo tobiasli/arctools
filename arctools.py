@@ -539,6 +539,8 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
     raster, we convert both to matching extent raster datasets.
     """
 
+    raster_precision = 1000
+
     accepted_types = ['FeatureClass', 'RasterDataset']
 
     zone_data_desc = arcpy.Describe(zone_data)
@@ -555,68 +557,109 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
         raise InputTypeException('zone_data is type FeatureClass, but zone_key_field is empty.')
     if not (value_data_desc.datasetType == 'RasterDataset' or zone_data_desc.datasetType == 'RasterDataset'):
         raise InputTypeException('One of input types must be a raster')
+    if not (value_data_desc.spatialReference.PCSCode == zone_data_desc.spatialReference.PCSCode and value_data_desc.spatialReference.GCSCode == zone_data_desc.spatialReference.GCSCode):
+        raise InputTypeException('Non matching coordinate systems between inputs.')
 
-    # Set the loaded raster as snapRaster:
-    if zone_data_desc.datasetType == 'RasterDataset':
-        frame_raster = zone_data
-        frame_desc = zone_data_desc
-    elif value_data_desc.datasetType == 'RasterDataset':
-        frame_raster = value_data
-        frame_desc = value_data_desc
+    # If zone data is feature class, perform intersect instead of zonal statistics:
+    if zone_data_desc.datasetType == 'FeatureClass':
+        if value_data_desc.dataType == 'RasterDataset':
 
-    if zone_data_desc.datasetType == 'FeatureClass' and frame_desc.meanCellHeight > 10:
-        raise InputTypeException('Raster resolution is too poor. Zone precision will be hampered.')
+            _check_out_arcgis_license()
+            scaled_value = arcpy.sa.Times(value_data, raster_precision)
+            int_scaled_value = arcpy.sa.Int(scaled_value)
+            if arcpy.Exists(r'in_memory\raster_conversion'):
+                arcpy.Delete_management(r'in_memory\raster_conversion')
+            if arcpy.Exists(r'in_memory\intersect'):
+                arcpy.Delete_management(r'in_memory\intersect')
+            arcpy.RasterToPolygon_conversion(int_scaled_value, r'in_memory\raster_conversion', 'NO_SIMPLIFY')
+            _check_in_arcgis_licence()
+            arcpy.AddField_management(r'in_memory\raster_conversion', 'value', 'DOUBLE')
 
-    arcpy.env.snapRaster = str(frame_raster)
-    arcpy.env.extent = arcpy.Describe(frame_raster).extent
+            with arcpy.da.UpdateCursor(r'in_memory\raster_conversion', ['gridcode', 'value']) as cursor:
+                for row in cursor:
+                    row[1] = row[0]/raster_precision
+                    cursor.updateRow(row)
 
-    # Convert to raster if value is polygon:
-    if value_data_desc.datasetType == 'RasterDataset':
-        value_raster = value_data
-    elif value_data_desc.datasetType == 'FeatureClass':
-        value_raster = arcpy.PolygonToRaster_conversion(value_data, value_field=value_key_field, cellsize=frame_desc.meanCellHeight)
+            arcpy.Intersect_analysis([r'in_memory\raster_conversion', zone_data], r'in_memory\intersect')
+
+            split_results = tableToDict(r'in_memory\intersect', groupBy=zone_key_field)
+            if not zone_key_field:
+                zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+
+            results = {k: {zone_key_field: k} for k in split_results}
+            for k, v in split_results.items():
+                if 'mean' in method:
+                    results[k]['mean'] = sum([part['value']/part['Shape@'].area for part in v])
+                if 'sum' in method:
+                    results[k]['sum'] = sum([part['value'] for part in v])
+                if 'max' in method:
+                    results[k]['max'] = max([part['value'] for part in v])
+                if 'max' in method:
+                    results[k]['max'] = min([part['value'] for part in v])
+
+            return results
     else:
-        raise InputTypeException('The provided zone_data is not a supported data format.')
+        # Set the loaded raster as snapRaster:
+        if zone_data_desc.datasetType == 'RasterDataset':
+            frame_raster = zone_data
+            frame_desc = zone_data_desc
+        elif value_data_desc.datasetType == 'RasterDataset':
+            frame_raster = value_data
+            frame_desc = value_data_desc
 
-    # Convert to raster if zone is polygon:
-    if zone_data_desc.datasetType == 'RasterDataset':
-        zone_raster = zone_data
-    elif zone_data_desc.datasetType == 'FeatureClass':
-        zone_raster = arcpy.PolygonToRaster_conversion(zone_data, value_field=zone_key_field, cellsize=frame_desc.meanCellHeight)
-    else:
-        raise InputTypeException('The provided zone_data is not a supported data format.')
+        if zone_data_desc.datasetType == 'FeatureClass' and frame_desc.meanCellHeight > 10:
+            raise InputTypeException('Raster resolution is too poor. Zone precision will be hampered.')
 
-    zone_desc = arcpy.Describe(zone_raster)
-    value_desc = arcpy.Describe(value_raster)
+        arcpy.env.snapRaster = str(frame_raster)
+        arcpy.env.extent = arcpy.Describe(frame_raster).extent
 
-    # Assert that resulting rasters align:
-    assert value_desc.spatialReference.PCSCode == zone_desc.spatialReference.PCSCode
-    assert value_desc.spatialReference.GCSCode == zone_desc.spatialReference.GCSCode
-    assert value_desc.extent.lowerLeft.Y == zone_desc.extent.lowerLeft.Y
-    assert value_desc.extent.lowerLeft.X == zone_desc.extent.lowerLeft.X
-    assert value_desc.meanCellHeight == zone_desc.meanCellHeight
-    assert value_desc.meanCellWidth == zone_desc.meanCellWidth
+        # Convert to raster if value is polygon:
+        if value_data_desc.datasetType == 'RasterDataset':
+            value_raster = value_data
+        elif value_data_desc.datasetType == 'FeatureClass':
+            value_raster = arcpy.PolygonToRaster_conversion(value_data, value_field=value_key_field, cellsize=frame_desc.meanCellHeight)
+        else:
+            raise InputTypeException('The provided zone_data is not a supported data format.')
 
-    value = arcpy.RasterToNumPyArray(str(value_raster))
-    if value.dtype is arcpy.numpy.dtype('uint8'):
-        value = value.astype('float64')
-        value[value == 255] = None
-    else:
-        value = value.astype('float64')
-        value[value == value_desc.noDataValue] = None
+        # Convert to raster if zone is polygon:
+        if zone_data_desc.datasetType == 'RasterDataset':
+            zone_raster = zone_data
+        elif zone_data_desc.datasetType == 'FeatureClass':
+            zone_raster = arcpy.PolygonToRaster_conversion(zone_data, value_field=zone_key_field, cellsize=frame_desc.meanCellHeight)
+        else:
+            raise InputTypeException('The provided zone_data is not a supported data format.')
 
-    zone = arcpy.RasterToNumPyArray(str(zone_raster))
-    if zone.dtype is arcpy.numpy.dtype('uint8'):
-        zone = zone.astype('float64')
-        zone[zone == 255] = None
-    else:
-        zone = zone.astype('float64')
-        zone[zone == zone_desc.noDataValue] = None
+        zone_desc = arcpy.Describe(zone_raster)
+        value_desc = arcpy.Describe(value_raster)
 
-    if not zone_key_field:
-        zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+        # Assert that resulting rasters align:
+        assert value_desc.spatialReference.PCSCode == zone_desc.spatialReference.PCSCode
+        assert value_desc.spatialReference.GCSCode == zone_desc.spatialReference.GCSCode
+        assert value_desc.extent.lowerLeft.Y == zone_desc.extent.lowerLeft.Y
+        assert value_desc.extent.lowerLeft.X == zone_desc.extent.lowerLeft.X
+        assert value_desc.meanCellHeight == zone_desc.meanCellHeight
+        assert value_desc.meanCellWidth == zone_desc.meanCellWidth
 
-    return _zonal_statistics_as_dict(value, zone, method, zone_key_field)
+        value = arcpy.RasterToNumPyArray(str(value_raster))
+        if value.dtype is arcpy.numpy.dtype('uint8'):
+            value = value.astype('float64')
+            value[value == 255] = None
+        else:
+            value = value.astype('float64')
+            value[value == value_desc.noDataValue] = None
+
+        zone = arcpy.RasterToNumPyArray(str(zone_raster))
+        if zone.dtype is arcpy.numpy.dtype('uint8'):
+            zone = zone.astype('float64')
+            zone[zone == 255] = None
+        else:
+            zone = zone.astype('float64')
+            zone[zone == zone_desc.noDataValue] = None
+
+        if not zone_key_field:
+            zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+
+        return _zonal_statistics_as_dict(value, zone, method, zone_key_field)
 
 
 def _zonal_statistics_as_dict(value_array, zone_array, methods='mean', zone_key_field='id'):

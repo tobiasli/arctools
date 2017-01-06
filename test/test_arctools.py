@@ -46,21 +46,21 @@ class TestArctoolsModule(unittest.TestCase):
         temp_raster = os.path.join('in_memory', 'temp_raster')
         if arctools.arcpy.Exists(temp_raster):
             arctools.arcpy.Delete(temp_raster)
-        value_raster = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Area', out_rasterdataset=temp_raster, cellsize=1000)
+        value_raster = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Length', out_rasterdataset=temp_raster, cellsize=1000)
 
         # Raster value, Polygon zonal:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=os.path.join(TEST_GDB, DATASETS[0]),
                                                     zone_key_field='OBJECTID')
 
-        self.assertTrue(results == {1.0: {'mean': 83727707.139100626, 'OBJECTID': 1.0}, 2.0: {'mean': 107970456.89293019, 'OBJECTID': 2.0}, 3.0: {'mean': 106816507.34451807, 'OBJECTID': 3.0}})
+        self.assertTrue(results == {1: {'OBJECTID': 1, 'mean': 0.0010825648754691818}, 2: {'OBJECTID': 2, 'mean': 0.009181874117074926}, 3: {'OBJECTID': 3, 'mean': 0.004449951349145824}, 4: {'OBJECTID': 4, 'mean': 0.0020576288672450736}, 5: {'OBJECTID': 5, 'mean': 0.0037129196933174385}, 6: {'OBJECTID': 6, 'mean': 0.0033706004855966636}})
 
         # Raster value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=value_raster,
                                                     zone_key_field='OBJECTID')
 
-        self.assertTrue(results == {34059634.472718053: {'mean': 34059634.47271803, 'OBJECTID': 34059634.472718053}, 76936293.533665821: {'mean': 76936293.533665732, 'OBJECTID': 76936293.533665821}, 122752621.37697256: {'mean': 122752621.37697232, 'OBJECTID': 122752621.37697256}})
+        self.assertTrue(results == {23632.885296373341: {'OBJECTID': 23632.885296373341, 'mean': 23632.885296373359}, 57518.941553407247: {'OBJECTID': 57518.941553407247, 'mean': 34102.250329783834}, 34102.250329783841: {'OBJECTID': 34102.250329783841, 'mean': 57518.941553407327}})
 
         # Polygon value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
@@ -68,16 +68,15 @@ class TestArctoolsModule(unittest.TestCase):
                                                     method='sum',
                                                     value_key_field='OBJECTID')
 
-        self.assertTrue(results == {34059634.472718053: {'id': 34059634.472718053, 'sum': 28.0}, 76936293.533665821: {'id': 76936293.533665821, 'sum': 24.0}, 122752621.37697256: {'id': 122752621.37697256, 'sum': 103.0}})
+        self.assertTrue(results == {23632.885296373341: {'id': 23632.885296373341, 'sum': 28.0}, 57518.941553407247: {'id': 57518.941553407247, 'sum': 24.0}, 34102.250329783841: {'id': 34102.250329783841, 'sum': 103.0}})
 
-        # Polygon value, raster zonal: Multiple methods:
-        results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
-                                                    zone_data=value_raster,
+        # Polygon value, polygon zonal: Multiple methods:
+        results = arctools.zonal_statistics_as_dict(value_data=value_raster,
+                                                    zone_data=os.path.join(TEST_GDB, DATASETS[0]),
                                                     method=['mean', 'sum'],
-                                                    value_key_field='OBJECTID')
+                                                    zone_key_field='OBJECTID')
 
         self.assertTrue(results == {34059634.472718053: {'id': 34059634.472718053, 'sum': 28.0, 'mean': 1.1200000000000001}, 76936293.533665821: {'id': 76936293.533665821, 'sum': 24.0, 'mean': 3.0}, 122752621.37697256: {'id': 122752621.37697256, 'sum': 103.0, 'mean': 1.7758620689655173}})
-
 
     def test_tableToDict_method(self):
         for dataset in DATASETS:
