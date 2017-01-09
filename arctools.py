@@ -555,8 +555,8 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
         raise InputTypeException('value_data is type FeatureClass, but value_key_field is empty.')
     if zone_data_desc.datasetType == 'FeatureClass' and not zone_key_field:
         raise InputTypeException('zone_data is type FeatureClass, but zone_key_field is empty.')
-    if not (value_data_desc.datasetType == 'RasterDataset' or zone_data_desc.datasetType == 'RasterDataset'):
-        raise InputTypeException('One of input types must be a raster')
+#    if not (value_data_desc.datasetType == 'RasterDataset' or zone_data_desc.datasetType == 'RasterDataset'):
+#        raise InputTypeException('One of input types must be a raster')
     if not (value_data_desc.spatialReference.PCSCode == zone_data_desc.spatialReference.PCSCode and value_data_desc.spatialReference.GCSCode == zone_data_desc.spatialReference.GCSCode):
         raise InputTypeException('Non matching coordinate systems between inputs.')
 
@@ -569,8 +569,6 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
             int_scaled_value = arcpy.sa.Int(scaled_value)
             if arcpy.Exists(r'in_memory\raster_conversion'):
                 arcpy.Delete_management(r'in_memory\raster_conversion')
-            if arcpy.Exists(r'in_memory\intersect'):
-                arcpy.Delete_management(r'in_memory\intersect')
             arcpy.RasterToPolygon_conversion(int_scaled_value, r'in_memory\raster_conversion', 'NO_SIMPLIFY')
             _check_in_arcgis_licence()
             arcpy.AddField_management(r'in_memory\raster_conversion', 'value', 'DOUBLE')
@@ -580,24 +578,37 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
                     row[1] = row[0]/raster_precision
                     cursor.updateRow(row)
 
-            arcpy.Intersect_analysis([r'in_memory\raster_conversion', zone_data], r'in_memory\intersect')
+            value_data_path = r'in_memory\raster_conversion'
 
-            split_results = tableToDict(r'in_memory\intersect', groupBy=zone_key_field)
-            if not zone_key_field:
-                zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+        else:
+            value_data_path = value_data
 
-            results = {k: {zone_key_field: k} for k in split_results}
-            for k, v in split_results.items():
-                if 'mean' in method:
-                    results[k]['mean'] = sum([part['value']/part['Shape@'].area for part in v])
-                if 'sum' in method:
-                    results[k]['sum'] = sum([part['value'] for part in v])
-                if 'max' in method:
-                    results[k]['max'] = max([part['value'] for part in v])
-                if 'max' in method:
-                    results[k]['max'] = min([part['value'] for part in v])
+        if arcpy.Exists(r'in_memory\intersect'):
+            arcpy.Delete_management(r'in_memory\intersect')
+        arcpy.Intersect_analysis([zone_data, value_data_path], r'in_memory\intersect')
 
-            return results
+        if not value_key_field:
+            value_key_field = 'value'
+        if not zone_key_field:
+            zone_key_field = 'id'  # For calculation results we need some kind of name for the zone ids.
+
+        value_shape = arcpy.Describe(r'in_memory\intersect').shapeFieldName + '@'
+
+        split_results = tableToDict(r'in_memory\intersect', fields=[value_key_field, value_shape, zone_key_field], groupBy=zone_key_field)
+
+        results = {k: {zone_key_field: k} for k in split_results}
+        for k, v in split_results.items():
+            if 'mean' in method:
+                results[k]['mean'] = sum([part[value_key_field]*part[value_shape].area for part in v])/sum([part[value_shape].area for part in v])
+            if 'sum' in method:
+                results[k]['sum'] = sum([part[value_key_field] for part in v])
+            if 'max' in method:
+                results[k]['max'] = max([part[value_key_field] for part in v])
+            if 'max' in method:
+                results[k]['max'] = min([part[value_key_field] for part in v])
+
+        return results
+
     else:
         # Set the loaded raster as snapRaster:
         if zone_data_desc.datasetType == 'RasterDataset':
