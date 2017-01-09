@@ -46,21 +46,25 @@ class TestArctoolsModule(unittest.TestCase):
         temp_raster = os.path.join('in_memory', 'temp_raster')
         if arctools.arcpy.Exists(temp_raster):
             arctools.arcpy.Delete(temp_raster)
-        value_raster = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Length', out_rasterdataset=temp_raster, cellsize=1000)
+        value_raster_null = arctools.arcpy.PolygonToRaster_conversion((os.path.join(TEST_GDB, DATASETS[1])), 'SHAPE_Length', out_rasterdataset=temp_raster, cellsize=1000)
+
+        arctools.arcpy.CheckOutExtension('spatial')
+        value_raster = arctools.arcpy.sa.Con(arctools.arcpy.sa.IsNull(value_raster_null), 0, value_raster_null)
+        arctools.arcpy.CheckInExtension('spatial')
 
         # Raster value, Polygon zonal:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=os.path.join(TEST_GDB, DATASETS[0]),
                                                     zone_key_field='id')
 
-        self.assertTrue(results == {1: {'OBJECTID': 1, 'mean': 0.0010825648754691818}, 2: {'OBJECTID': 2, 'mean': 0.009181874117074926}, 3: {'OBJECTID': 3, 'mean': 0.004449951349145824}, 4: {'OBJECTID': 4, 'mean': 0.0020576288672450736}, 5: {'OBJECTID': 5, 'mean': 0.0037129196933174385}, 6: {'OBJECTID': 6, 'mean': 0.0033706004855966636}})
+        self.assertTrue(results == {1: {'id': 1, 'mean': 21079.51936662218}, 2: {'id': 2, 'mean': 9544.808038009538}})
 
         # Raster value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
                                                     zone_data=value_raster,
                                                     zone_key_field='id')
 
-        self.assertTrue(results == {23632.885296373341: {'OBJECTID': 23632.885296373341, 'mean': 23632.885296373359}, 57518.941553407247: {'OBJECTID': 57518.941553407247, 'mean': 34102.250329783834}, 34102.250329783841: {'OBJECTID': 34102.250329783841, 'mean': 57518.941553407327}})
+        self.assertTrue(results == {0.0: {'mean': 0.0, 'id': 0.0}, 23632.884765625: {'mean': 23632.884765625, 'id': 23632.884765625}, 57518.94140625: {'mean': 34102.25, 'id': 57518.94140625}, 34102.25: {'mean': 57518.94140625, 'id': 34102.25}})
 
         # Polygon value, Raster zonal:
         results = arctools.zonal_statistics_as_dict(value_data=os.path.join(TEST_GDB, DATASETS[0]),
@@ -68,7 +72,7 @@ class TestArctoolsModule(unittest.TestCase):
                                                     method='sum',
                                                     value_key_field='id')
 
-        self.assertTrue(results == {23632.885296373341: {'id': 23632.885296373341, 'sum': 28.0}, 57518.941553407247: {'id': 57518.941553407247, 'sum': 24.0}, 34102.250329783841: {'id': 34102.250329783841, 'sum': 103.0}})
+        self.assertTrue(results == {0.0: {'sum': 290.0, 'id': 0.0}, 23632.884765625: {'sum': 25.0, 'id': 23632.884765625}, 57518.94140625: {'sum': 16.0, 'id': 57518.94140625}, 34102.25: {'sum': 73.0, 'id': 34102.25}})
 
         # Raster value, polygon zonal: Multiple methods:
         results = arctools.zonal_statistics_as_dict(value_data=value_raster,
@@ -76,10 +80,9 @@ class TestArctoolsModule(unittest.TestCase):
                                                     method=['mean', 'sum'],
                                                     zone_key_field='id')
 
-        self.assertTrue(results == {1: {'sum': 23632.886, 'mean': 0.0010825648754691818, 'OBJECTID': 1}, 2: {'sum': 23632.886, 'mean': 0.009181874117074926, 'OBJECTID': 2}, 3: {'sum': 34102.252, 'mean': 0.004449951349145824, 'OBJECTID': 3}, 4: {'sum': 57518.94, 'mean': 0.0020576288672450736, 'OBJECTID': 4}, 5: {'sum': 57518.94, 'mean': 0.0037129196933174385, 'OBJECTID': 5}, 6: {'sum': 57518.94, 'mean': 0.0033706004855966636, 'OBJECTID': 6}})
+        self.assertTrue(results == {1: {'mean': 21079.51936662218, 'sum': 162303.648, 'id': 1}, 2: {'mean': 9544.808038009538, 'sum': 91621.188, 'id': 2}})
 
     def test_tableToDict_method(self):
-        return 0
         for dataset in DATASETS:
             fullpath = os.path.join(TEST_GDB, dataset)
 
@@ -90,7 +93,6 @@ class TestArctoolsModule(unittest.TestCase):
             # TODO
 
     def test_dictToTable_method(self):
-        return 0
         for dataset, fields in [(DATASETS[i], FIELDS[i]) for i in [0, 2]]:
             try:
                 input = os.path.join(TEST_GDB, dataset)
