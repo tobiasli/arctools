@@ -541,7 +541,7 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
 
     raster_precision = 1000
 
-    accepted_types = ['FeatureClass', 'RasterDataset']
+    accepted_types = ['FeatureClass', 'RasterDataset', 'MosaicDataset']
 
     zone_data_desc = arcpy.Describe(zone_data)
     value_data_desc = arcpy.Describe(value_data)
@@ -569,7 +569,9 @@ def zonal_statistics_as_dict(value_data, zone_data, method='mean', value_key_fie
             int_scaled_value = arcpy.sa.Int(scaled_value)
             if arcpy.Exists(r'in_memory\raster_conversion'):
                 arcpy.Delete_management(r'in_memory\raster_conversion')
+            arcpy.env.extent = zone_data
             arcpy.RasterToPolygon_conversion(int_scaled_value, r'in_memory\raster_conversion', 'NO_SIMPLIFY')
+            arcpy.env.extent = "MAXOF"
             _check_in_arcgis_licence()
             arcpy.AddField_management(r'in_memory\raster_conversion', 'value', 'DOUBLE')
 
